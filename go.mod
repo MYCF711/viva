@@ -1,4 +1,4 @@
-module github.com/vivaui/viva
+module github.com/MYCF711/viva
 
 go 1.26.0
 
