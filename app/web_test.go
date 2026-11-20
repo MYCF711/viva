@@ -242,6 +242,7 @@ type testWebView struct {
 	canGoBack    bool
 	canGoForward bool
 	loading      bool
+	failure      platform.WebProcessFailure
 	loaded       []string
 }
 
@@ -263,7 +264,10 @@ func (view *testWebView) Title() string           { return view.title }
 func (view *testWebView) CanGoBack() bool         { return view.canGoBack }
 func (view *testWebView) CanGoForward() bool      { return view.canGoForward }
 func (view *testWebView) IsLoading() bool         { return view.loading }
-func (view *testWebView) Close()                  {}
+func (view *testWebView) ProcessFailure() platform.WebProcessFailure {
+	return view.failure
+}
+func (view *testWebView) Close() {}
 
 func TestAPageReportsItsOwnState(t *testing.T) {
 	page := &testWebView{title: "Settings", canGoBack: true, loading: true}
@@ -322,5 +326,52 @@ func TestALoadReportCarriesTheTitleAndTheFailure(t *testing.T) {
 	if got := loads[1]; got.Title != "Error" || got.Code != WebLoadHostNotFound ||
 		got.Description != "A server with the specified hostname could not be found." {
 		t.Fatalf("a load that failed = %+v, want the title and the engine's reason", got)
+	}
+}
+
+func TestAPageWhoseProcessIsGoneReachesTheApplication(t *testing.T) {
+	var report func(platform.WebProcessFailure)
+	page := &testWebView{}
+	host := &WebHost{native: &platform.WebHost{Open: func(config platform.WebViewConfig) (platform.WebView, error) {
+		report = config.OnProcessFailed
+		return page, nil
+	}}}
+	var failures []WebProcessFailure
+	view, err := host.Open(WebViewConfig{OnProcessFailed: func(failure WebProcessFailure) {
+		failures = append(failures, failure)
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report == nil {
+		t.Fatal("the platform got no process failure callback")
+	}
+	report(platform.WebProcessKilled)
+	if len(failures) != 1 || failures[0] != WebProcessKilled {
+		t.Fatalf("a page the system stopped reported %v, want it named", failures)
+	}
+	// The page answers the same question afterwards, read from the page each time.
+	page.failure = platform.WebProcessKilled
+	if !view.IsCrashed() || view.ProcessFailure() != WebProcessKilled {
+		t.Fatalf("crashed=%v failure=%v, want the page's own state", view.IsCrashed(), view.ProcessFailure())
+	}
+	// The process a page has again is not the one it lost.
+	page.failure = platform.WebProcessNoFailure
+	if view.IsCrashed() || view.ProcessFailure() != WebProcessNoFailure {
+		t.Fatalf("crashed=%v failure=%v, want a page with its process", view.IsCrashed(), view.ProcessFailure())
+	}
+}
+
+func TestAPageNobodyWatchesForFailureGivesThePlatformNone(t *testing.T) {
+	var got platform.WebViewConfig
+	host := &WebHost{native: &platform.WebHost{Open: func(config platform.WebViewConfig) (platform.WebView, error) {
+		got = config
+		return &testWebView{}, nil
+	}}}
+	if _, err := host.Open(WebViewConfig{}); err != nil {
+		t.Fatal(err)
+	}
+	if got.OnProcessFailed != nil {
+		t.Fatal("an application that set no OnProcessFailed got one")
 	}
 }
