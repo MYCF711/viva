@@ -3,6 +3,8 @@ package app
 import (
 	"errors"
 	"math"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/vivaui/viva/gfx"
